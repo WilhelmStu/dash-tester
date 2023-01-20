@@ -11,19 +11,20 @@ import org.openqa.selenium.chromium.ChromiumNetworkConditions;
 
 import java.io.*;
 import java.sql.Timestamp;
-import java.util.HashSet;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.TimeZone;
 
-import static com.codeborne.selenide.Condition.attribute;
+import static ams.stream.test.Utils.getProcessOnPort;
+import static ams.stream.test.Utils.killProcess;
 
 public class DashStreamTests {
-    //MainPage mainPage = new MainPage();
     private ChromeDriver driver;
-    private BufferedReader proxyOutput;
-    private  Thread bgThread;
+    private Thread bgThread;
     private String startTime;
+    private BufferedWriter writer;
     private static final Integer PROXY_PORT = 8085;
 
     @BeforeAll
@@ -32,13 +33,21 @@ public class DashStreamTests {
         //SelenideLogger.addListener("allure", new AllureSelenide());
     }
 
+    /**
+     * Setup
+     * First a timestamp is recorded for each test
+     * Then the old proxy processes are terminated (keeps running even if Java process is terminated)
+     * Then sets up chrome driver with proxy
+     * The Proxy is started in a background process and logs all response headers and times
+     *
+     */
     @BeforeEach
     public void setUp() {
         startTime = new Timestamp(System.currentTimeMillis()).toString();
+        System.err.println("Finding and killing processes on proxy port: " + PROXY_PORT);
         Set<String> ids = getProcessOnPort(PROXY_PORT);
-        for (String id: ids
+        for (String id : ids
         ) {
-            System.err.println(id);
             killProcess(id);
         }
 
@@ -64,13 +73,17 @@ public class DashStreamTests {
     // performance of browser : https://stackoverflow.com/questions/45847035/using-selenium-how-to-get-network-request
     // proxy: https://github.com/browserup/mitmproxy/blob/main/clients/examples/java/src/test/java/com/javatest/JavaClientTest.java
     @Test
-    public void test1(){
-        System.out.println("Starting a test at: " + startTime);
+    public void test1() throws IOException {
+        System.out.println("Starting test1 at: " + startTime);
         driver.get("https://streaming.stulpinger.at/");
         waitForPageLoad(driver);
         driver.setNetworkConditions(new ChromiumNetworkConditions()); //todo
         WebElement video = driver.findElement(By.tagName("video"));
         StringBuilder build = new StringBuilder();
+        File out = new File("out" + File.separator + "Buffer-" + startTime.replace(':', '-') + ".txt");
+        out.getParentFile().mkdir();
+        out.createNewFile();
+        this.writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
         while (true) {
             build.setLength(0);
             JavascriptExecutor js = driver;
@@ -93,10 +106,13 @@ public class DashStreamTests {
             } else {
                 build.append(bufferSize);
             }
-
+            this.writer.write(build.toString());
+            this.writer.newLine();
+            this.writer.flush();
             System.out.println(build);
+
             try {
-                Thread.sleep(100);
+                Thread.sleep(1000);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -104,9 +120,11 @@ public class DashStreamTests {
     }
 
     @AfterEach
-    public void tearDown() {
+    public void tearDown() throws IOException {
         driver.quit();
         bgThread.interrupt();
+        writer.flush();
+        writer.close();
     }
 
     private static void waitForPageLoad(WebDriver driver) {
@@ -127,7 +145,7 @@ public class DashStreamTests {
             out.createNewFile();
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
             Process p = builder.start();
-            proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            BufferedReader proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             String lineBefore = "";
             while (true) {
@@ -137,9 +155,10 @@ public class DashStreamTests {
                 }
                 System.out.println(line);
                 if (line.startsWith("Response time:")) {
-                    writer.write(lineBefore);
-                    writer.newLine();
-                    writer.write(line);
+                    writer.write(transFormString(lineBefore, line));
+                    //writer.write(lineBefore);
+                    //writer.newLine();
+                    //writer.write(line);
                     writer.write("\n----\n");
                     writer.flush();
                     System.out.println(lineBefore);
@@ -159,70 +178,19 @@ public class DashStreamTests {
         }
     }
 
-    private static Set<String> getProcessOnPort(int p){
-        Set<String> processesOnPort = new HashSet<>();
-        ProcessBuilder pb = new ProcessBuilder
-                ("cmd.exe", "/c", "netstat -ano | findstr :" + p);
-        Process process;
-        try {
-            process = pb.start();
-            process.waitFor();
+    // GET /content/video/chunk-stream9-00003.webm HTTP/2.0
+    // Response time: Fri, 20 Jan 2023 17:24:44 GMT
+    private String transFormString(String lineBefore, String line){
 
-            BufferedReader processes = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-
-            while (true) {
-                line = processes.readLine();
-                if (line == null) break;
-                System.err.println(line);
-                processesOnPort.add(line.substring(line.length()-5).trim());
-            }
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-            throw new RuntimeException(e);
-        }
-        return processesOnPort;
+        String date = line.split(":", 2)[1].trim();
+        DateTimeFormatter formatterInput = DateTimeFormatter.ofPattern("EEE, dd LLL uuuu HH:mm:ss zzz", Locale.ENGLISH).withZone(ZoneId.of("Etc/UTC"));
+        Instant timestamp = Instant.from(formatterInput.parse(date));
+        //LocalDateTime dateTime = LocalDateTime.from(formatterInput.parse(date));
+        DateTimeFormatter formatterOutput = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSS");
+        ZoneId z = ZoneId.of("Europe/Paris");
+        ZonedDateTime zdt = timestamp.atZone(z);
+        return lineBefore + "; Response time: " + zdt.format(formatterOutput); // .atZone(ZoneId.of("Europe/Paris")).
     }
 
-    private static void killProcess (String id) {
-        ProcessBuilder pb = new ProcessBuilder
-                ("cmd.exe", "/c", "taskkill /F /PID " + id);
-        Process process;
-        try {
-            process = pb.start();
-            process.waitFor();
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-            System.err.println("Could not kill process with id:" + id);
-        }
-    }
+
 }
-
-    /*
-    @Test
-    public void search() {
-        mainPage.searchButton.click();
-
-        $("[data-test='search-input']").sendKeys("Selenium");
-        $("button[data-test='full-search-button']").click();
-
-        $("input[data-test='search-input']").shouldHave(attribute("value", "Selenium"));
-    }
-
-    @Test
-    public void toolsMenu() {
-        mainPage.toolsMenu.click();
-
-        $("div[data-test='main-submenu']").shouldBe(visible);
-    }
-
-    @Test
-    public void navigationToAllTools() {
-        mainPage.seeAllToolsButton.click();
-
-        $("#products-page").shouldBe(visible);
-
-        assertEquals("All Developer Tools and Products by JetBrains", Selenide.title());
-    }
-}
-     */
