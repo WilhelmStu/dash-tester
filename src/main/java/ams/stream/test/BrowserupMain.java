@@ -8,7 +8,7 @@ import com.browserup.proxy_client.Counter;
 import com.browserup.proxy.api.BrowserUpProxyApi;
 
 /**
- * Does not work
+ * Does not work...
  */
 public class BrowserupMain {
     public static void main(String[] args) {
