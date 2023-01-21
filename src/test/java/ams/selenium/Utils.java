@@ -1,4 +1,4 @@
-package ams.stream.test;
+package ams.selenium;
 
 import java.io.BufferedReader;
 import java.io.IOException;
