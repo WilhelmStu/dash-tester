@@ -9,7 +9,6 @@ import org.openqa.selenium.remote.Response;
 
 import java.io.*;
 import java.time.Duration;
-import java.time.temporal.TemporalUnit;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -38,14 +37,26 @@ public class NetworkCondition {
         this.latency = Integer.parseInt(split[2]);
     }
 
+    /**
+     * Updates the given ChromiumNetworkConditions with new Values
+     * Both the Upload and Download is set since calling getDownloadThroughput() returns the Upload value for some reason
+     * The values also need to be multiplied by 1024 since the function takes bps and not Kbps as described in doc
+     * @param conditions
+     * @return
+     */
     public ChromiumNetworkConditions updateChromiumNetworkConditions(ChromiumNetworkConditions conditions){
         conditions.setUploadThroughput(this.bandwidth * 1024);
         conditions.setDownloadThroughput(this.bandwidth * 1024);
         conditions.setLatency(Duration.ofMillis(this.latency));
         return conditions;
-
     }
 
+    /**
+     * Parses the given network conditions file, expects it to be in the root folder under ./network
+     * The file has the .csv format and contains timepoints; bitrates; latency
+     * @param file
+     * @return
+     */
     public static LinkedList<NetworkCondition> parseNetworkConditionsFile (String file){
         if (Objects.equals(file, "none")){
             return new LinkedList<>();
@@ -78,6 +89,12 @@ public class NetworkCondition {
     }
 
 
+    /**
+     * This is an alternative way to set the Network conditions of chrome
+     * Still the upload and download parameters are mixed up somewhere in this library
+     * @param driver
+     * @param download
+     */
     public void alternativeSetNetworkConditions(ChromeDriver driver, int download){
         CommandExecutor executor = driver.getCommandExecutor();
         Map<String, Object> map = new HashMap<String, Object>();

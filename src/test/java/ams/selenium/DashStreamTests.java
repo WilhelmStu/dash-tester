@@ -23,6 +23,7 @@ public class DashStreamTests {
     private Timestamp startTime;
     private BufferedWriter writer;
     private static final Integer PROXY_PORT = 8087;
+    private static final Integer CYCLE_TIME = 500;
 
     @BeforeAll
     public static void setUpAll() {
@@ -37,7 +38,7 @@ public class DashStreamTests {
      * The Proxy is started in a background process and logs all response headers and times
      */
     @BeforeEach
-    public void setUp() throws IOException {
+    public void setUp() {
         startTime = new Timestamp(System.currentTimeMillis());
         System.err.println("Finding and killing processes on proxy port: " + PROXY_PORT);
         Set<String> ids = Utils.getProcessOnPort(PROXY_PORT);
@@ -50,16 +51,6 @@ public class DashStreamTests {
         ChromeOptions options = new ChromeOptions();
         options.addArguments("--proxy-server=http://localhost:" + PROXY_PORT);
         driver = new ChromeDriver(options);
-        //ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
-        //cond.setDownloadThroughput(500 * 1024);
-        //System.err.println(cond.getDownloadThroughput());
-
-        //setNetworkConditions(driver, -1);
-
-        //WebDriver aug = new Augmenter().augment(driver);
-        //((HasNetworkConditions) aug).setNetworkConditions(cond);
-        //System.err.println(((HasNetworkConditions) aug).getNetworkConditions().getDownloadThroughput());
-        //driver.setNetworkConditions(cond);
 
         Runnable r = this::startAndLogProxy;
         bgThread = new Thread(r);
@@ -76,7 +67,14 @@ public class DashStreamTests {
     // detect buffering: https://stackoverflow.com/questions/21399872/how-to-detect-whether-html5-video-has-paused-for-buffering
     // video element reference: https://www.w3schools.com/tags/ref_av_dom.asp
     // performance of browser : https://stackoverflow.com/questions/45847035/using-selenium-how-to-get-network-request
-    // proxy: https://github.com/browserup/mitmproxy/blob/main/clients/examples/java/src/test/java/com/javatest/JavaClientTest.java
+    // proxy: https://github.com/mitmproxy/mitmproxy
+
+    /**
+     * The main test class that is run once for each file defined in @ValueSource
+     * The whole test takes 10 minutes and outputs the current buffer of the video at specific points in time
+     * @param networkConditionsFile
+     * @throws IOException
+     */
     @ParameterizedTest
     @ValueSource(strings = {"conditions1.csv"})
     public void test1(String networkConditionsFile) throws IOException {
@@ -107,6 +105,7 @@ public class DashStreamTests {
             if (time > 600) break;
             System.out.println("Time: " + time + "s");
             System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
+
             if (nextConditions != null && nextConditions.getTimePoint() < time) {
                 currentConditions = nextConditions;
                 if (!networkConditions.isEmpty()) {
@@ -114,7 +113,6 @@ public class DashStreamTests {
                 } else {
                     nextConditions = null;
                 }
-
                 driver.setNetworkConditions(currentConditions.updateChromiumNetworkConditions(cond));
                 System.out.println("Now testing with network condition: " + currentConditions);
                 System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
@@ -144,7 +142,7 @@ public class DashStreamTests {
             System.out.println(build);
 
             try {
-                Thread.sleep(500);
+                Thread.sleep(CYCLE_TIME);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -159,6 +157,10 @@ public class DashStreamTests {
         writer.close();
     }
 
+    /**
+     * Makes sure the page is loaded before the video and logging starts
+     * @param driver
+     */
     private static void waitForPageLoad(WebDriver driver) {
         boolean done = false;
         while (!done) {
@@ -166,6 +168,11 @@ public class DashStreamTests {
         }
     }
 
+    /**
+     * This is the Mitmproxy thread that runs in the background and intercepts the HTTP traffic
+     * If the application is terminated, this cmd process will keep running in the background and block the Proxy port
+     * The output of the proxy is filtered with script.py only showing the request path and response timestamp
+     */
     private void startAndLogProxy() {
         ProcessBuilder builder = new ProcessBuilder(
                 "cmd.exe", "/c", "mitmdump -s script.py --mode regular@" + PROXY_PORT

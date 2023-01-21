@@ -12,6 +12,12 @@ import java.util.Locale;
 import java.util.Set;
 
 public class Utils {
+    /**
+     * Returns a set of processes that run on the given port
+     * Used to find the process of the mitmproxy that was executed in the run/test before the current one
+     * @param p port
+     * @return process IDs
+     */
     public static Set<String> getProcessOnPort(int p){
         Set<String> processesOnPort = new HashSet<>();
         ProcessBuilder pb = new ProcessBuilder
@@ -37,6 +43,10 @@ public class Utils {
         return processesOnPort;
     }
 
+    /**
+     * Terminated the process with the given ID
+     * @param id Process ID
+     */
     public static void killProcess (String id) {
         ProcessBuilder pb = new ProcessBuilder
                 ("cmd.exe", "/c", "taskkill /F /PID " + id);
@@ -54,9 +64,13 @@ public class Utils {
         return getDateTime(line) + "; " + getBitrateAndFileIdFromResponse(lineBefore); // .atZone(ZoneId.of("Europe/Paris")).
     }
 
+    /**
+     * Parses the String from the HTTP Request/Response for specific segments
+     * @param s
+     * @return
+     */
     // GET /content/video/chunk-stream9-00003.webm HTTP/2.0
     public static String getBitrateAndFileIdFromResponse(String s) {
-        StringBuilder builder = new StringBuilder();
         String[] split = s.split("-");
         if (split.length < 3) throw new IllegalArgumentException("Bad input string!");
         String bitrate = split[1];
@@ -75,13 +89,15 @@ public class Utils {
             case "stream12" -> "video; 4600; ";
             default -> "parse error!";
         };
-
         String id = split[2].split("\\.")[0];
         return bitrate + id;
-
-
     }
 
+    /**
+     * Parses the date of the HTTP Response and converts it to the correct time zone
+     * @param s
+     * @return
+     */
     // Response time: Fri, 20 Jan 2023 17:24:44 GMT
     public static String getDateTime(String s) {
         String date = s.split(":", 2)[1].trim();
