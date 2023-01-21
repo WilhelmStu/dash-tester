@@ -1,6 +1,5 @@
 package ams.selenium;
 
-import com.google.common.collect.ImmutableMap;
 import io.github.bonigarcia.wdm.managers.ChromeDriverManager;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -9,19 +8,14 @@ import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.chromium.ChromiumNetworkConditions;
-import org.openqa.selenium.chromium.HasNetworkConditions;
-import org.openqa.selenium.devtools.DevTools;
-import org.openqa.selenium.firefox.FirefoxDriver;
-import org.openqa.selenium.remote.*;
 
 
 import java.io.*;
 import java.sql.Timestamp;
-import java.time.*;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import static ams.selenium.NetworkCondition.parseNetworkConditionsFile;
+import static ams.selenium.Utils.transformString;
 
 public class DashStreamTests {
     private ChromeDriver driver;
@@ -41,7 +35,6 @@ public class DashStreamTests {
      * Then the old proxy processes are terminated (keeps running even if Java process is terminated)
      * Then sets up chrome driver with proxy
      * The Proxy is started in a background process and logs all response headers and times
-     *
      */
     @BeforeEach
     public void setUp() throws IOException {
@@ -55,7 +48,7 @@ public class DashStreamTests {
 
         ChromeDriverManager.chromedriver().setup();
         ChromeOptions options = new ChromeOptions();
-        //options.addArguments("--proxy-server=http://localhost:" + PROXY_PORT);
+        options.addArguments("--proxy-server=http://localhost:" + PROXY_PORT);
         driver = new ChromeDriver(options);
         //ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
         //cond.setDownloadThroughput(500 * 1024);
@@ -85,12 +78,12 @@ public class DashStreamTests {
     // performance of browser : https://stackoverflow.com/questions/45847035/using-selenium-how-to-get-network-request
     // proxy: https://github.com/browserup/mitmproxy/blob/main/clients/examples/java/src/test/java/com/javatest/JavaClientTest.java
     @ParameterizedTest
-    @ValueSource (strings = {"conditions1.csv"})
+    @ValueSource(strings = {"conditions1.csv"})
     public void test1(String networkConditionsFile) throws IOException {
         startTime = new Timestamp(System.currentTimeMillis());
         System.out.println("Starting test1 at: " + startTime + ", with network conditions: " + networkConditionsFile);
         LinkedList<NetworkCondition> networkConditions = parseNetworkConditionsFile(networkConditionsFile);
-        NetworkCondition currentConditions = new NetworkCondition(0,45000,0);
+        NetworkCondition currentConditions = new NetworkCondition(0, 45000, 0);
         NetworkCondition nextConditions = networkConditions.removeFirst();
 
         ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
@@ -105,24 +98,26 @@ public class DashStreamTests {
         out.getParentFile().mkdir();
         out.createNewFile();
         this.writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
+        writer.write("time; buffer(s)");
+        writer.newLine();
         while (true) {
             build.setLength(0);
             JavascriptExecutor js = driver;
-            long time = (System.currentTimeMillis() - startTime.getTime())/1000;
+            long time = (System.currentTimeMillis() - startTime.getTime()) / 1000;
             if (time > 600) break;
             System.out.println("Time: " + time + "s");
-            System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput()/1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
-            if(nextConditions!= null && nextConditions.getTimePoint() < time){
+            System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
+            if (nextConditions != null && nextConditions.getTimePoint() < time) {
                 currentConditions = nextConditions;
-                if (!networkConditions.isEmpty()){
+                if (!networkConditions.isEmpty()) {
                     nextConditions = networkConditions.removeFirst();
-                }else{
+                } else {
                     nextConditions = null;
                 }
 
                 driver.setNetworkConditions(currentConditions.updateChromiumNetworkConditions(cond));
                 System.out.println("Now testing with network condition: " + currentConditions);
-                System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput()/1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
+                System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
             }
 
 
@@ -185,21 +180,16 @@ public class DashStreamTests {
             BufferedReader proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             String lineBefore = "";
+            writer.write("time; type; bitrate Kbps; id");
             while (true) {
                 line = proxyOutput.readLine();
                 if (line == null) {
                     break;
                 }
-                //System.out.println(line);
                 if (line.startsWith("Response time:")) {
-                    writer.write(transFormString(lineBefore, line));
-                    //writer.write(lineBefore);
-                    //writer.newLine();
-                    //writer.write(line);
-                    //writer.write("\n----\n");
+                    writer.write(transformString(lineBefore, line));
+                    writer.newLine();
                     writer.flush();
-                    //System.out.println(lineBefore);
-                    //System.out.println(line);
                 } else {
                     lineBefore = line;
                 }
@@ -214,22 +204,5 @@ public class DashStreamTests {
             throw new RuntimeException(e);
         }
     }
-
-    // GET /content/video/chunk-stream9-00003.webm HTTP/2.0
-    // Response time: Fri, 20 Jan 2023 17:24:44 GMT
-    private String transFormString(String lineBefore, String line){
-
-        String date = line.split(":", 2)[1].trim();
-        DateTimeFormatter formatterInput = DateTimeFormatter.ofPattern("EEE, dd LLL uuuu HH:mm:ss zzz", Locale.ENGLISH).withZone(ZoneId.of("Etc/UTC"));
-        Instant timestamp = Instant.from(formatterInput.parse(date));
-        //LocalDateTime dateTime = LocalDateTime.from(formatterInput.parse(date));
-        DateTimeFormatter formatterOutput = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSS");
-        ZoneId z = ZoneId.of("Europe/Paris");
-        ZonedDateTime zdt = timestamp.atZone(z);
-        String result = lineBefore + "; Response time: " + zdt.format(formatterOutput) + "\n";
-        System.out.println(result);
-        return result ; // .atZone(ZoneId.of("Europe/Paris")).
-    }
-
 
 }
