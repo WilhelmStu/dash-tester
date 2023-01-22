@@ -72,16 +72,16 @@ public class DashStreamTests {
     /**
      * The main test class that is run once for each file defined in @ValueSource
      * The whole test takes 10 minutes and outputs the current buffer of the video at specific points in time
-     * @param networkConditionsFile
+     * @param networkConditionsFile test files
      * @throws IOException
      */
     @ParameterizedTest
-    @ValueSource(strings = {"conditions1.csv"})
+    @ValueSource(strings = {"conditions1.csv", "conditions2.csv"})
     public void test1(String networkConditionsFile) throws IOException {
-        startTime = new Timestamp(System.currentTimeMillis());
+        this.startTime = new Timestamp(System.currentTimeMillis());
         System.out.println("Starting test1 at: " + startTime + ", with network conditions: " + networkConditionsFile);
         LinkedList<NetworkCondition> networkConditions = parseNetworkConditionsFile(networkConditionsFile);
-        NetworkCondition currentConditions = new NetworkCondition(0, 45000, 0);
+        NetworkCondition currentConditions = new NetworkCondition(0, 5000, 0);
         NetworkCondition nextConditions = networkConditions.removeFirst();
 
         ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
@@ -92,7 +92,7 @@ public class DashStreamTests {
         waitForPageLoad(driver);
         WebElement video = driver.findElement(By.tagName("video"));
         StringBuilder build = new StringBuilder();
-        File out = new File("out" + File.separator + "Buffer-" + startTime.toString().replace(':', '-') + ".txt");
+        File out = new File("out" + File.separator + "Buffer-" + networkConditionsFile + "-" + startTime.toString().replace(':', '-') + ".txt");
         out.getParentFile().mkdir();
         out.createNewFile();
         this.writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
@@ -104,7 +104,7 @@ public class DashStreamTests {
             long time = (System.currentTimeMillis() - startTime.getTime()) / 1000;
             if (time > 600) break;
             System.out.println("Time: " + time + "s");
-            System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
+            //System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
 
             if (nextConditions != null && nextConditions.getTimePoint() < time) {
                 currentConditions = nextConditions;
@@ -139,7 +139,7 @@ public class DashStreamTests {
             this.writer.write(build.toString());
             this.writer.newLine();
             this.writer.flush();
-            System.out.println(build);
+            //System.out.println(build);
 
             try {
                 Thread.sleep(CYCLE_TIME);
@@ -174,8 +174,8 @@ public class DashStreamTests {
      * The output of the proxy is filtered with script.py only showing the request path and response timestamp
      */
     private void startAndLogProxy() {
-        ProcessBuilder builder = new ProcessBuilder(
-                "cmd.exe", "/c", "mitmdump -s script.py --mode regular@" + PROXY_PORT
+        ProcessBuilder builder = new ProcessBuilder( // http/2 needs to be disabled for better performance
+                "cmd.exe", "/c", "mitmdump -s script.py --set stream_large_bodies=250k --set http2=false --mode regular@" + PROXY_PORT
         );
         builder.redirectErrorStream(true);
         try {
