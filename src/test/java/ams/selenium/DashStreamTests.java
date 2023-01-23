@@ -12,18 +12,22 @@ import org.openqa.selenium.chromium.ChromiumNetworkConditions;
 
 import java.io.*;
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import static ams.selenium.NetworkCondition.parseNetworkConditionsFile;
 import static ams.selenium.Utils.transformString;
 
 public class DashStreamTests {
+    private static final Integer PROXY_PORT = 8087;
+    private static final Integer CYCLE_TIME = 500;
     private ChromeDriver driver;
     private Thread bgThread;
     private Timestamp startTime;
     private BufferedWriter writer;
-    private static final Integer PROXY_PORT = 8087;
-    private static final Integer CYCLE_TIME = 500;
+    private double currentTime = 0;
+
 
     @BeforeAll
     public static void setUpAll() {
@@ -79,6 +83,7 @@ public class DashStreamTests {
     @ValueSource(strings = {"conditions1.csv", "conditions2.csv"})
     public void test1(String networkConditionsFile) throws IOException {
         this.startTime = new Timestamp(System.currentTimeMillis());
+        DateTimeFormatter format = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSS");
         System.out.println("Starting test1 at: " + startTime + ", with network conditions: " + networkConditionsFile);
         LinkedList<NetworkCondition> networkConditions = parseNetworkConditionsFile(networkConditionsFile);
         NetworkCondition currentConditions = new NetworkCondition(0, 5000, 0);
@@ -96,7 +101,7 @@ public class DashStreamTests {
         out.getParentFile().mkdir();
         out.createNewFile();
         this.writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
-        writer.write("time; buffer(s)");
+        writer.write("time; buffer(s); video seconds");
         writer.newLine();
         while (true) {
             build.setLength(0);
@@ -120,22 +125,22 @@ public class DashStreamTests {
 
 
             double bufferUpperBound = 0;
-            double currentTime = 0;
             try {
                 bufferUpperBound = Double.parseDouble((String) js.executeScript("return JSON.stringify(arguments[0].buffered.end(0));", video));
-                currentTime = Double.parseDouble((String) js.executeScript("return JSON.stringify(arguments[0].currentTime);", video));// time
+                this.currentTime = Double.parseDouble((String) js.executeScript("return JSON.stringify(arguments[0].currentTime);", video));// time
             } catch (Exception e) {
                 System.out.println("Buffer of 0 / Error");
             }
 
-            build.append(new Timestamp(System.currentTimeMillis())).append("; ");
-            double bufferSize = bufferUpperBound - currentTime;
+            build.append(LocalDateTime.now().format(format)).append("; ");
+            double bufferSize = bufferUpperBound - this.currentTime;
 
-            if (bufferSize < 0.05) {
-                build.append("0.0; buffering");
+            if (bufferSize < 0.03) {
+                build.append("0.0; ");
             } else {
-                build.append(bufferSize);
+                build.append(bufferSize).append("; ");
             }
+            build.append(this.currentTime);
             this.writer.write(build.toString());
             this.writer.newLine();
             this.writer.flush();
@@ -187,7 +192,7 @@ public class DashStreamTests {
             BufferedReader proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             String lineBefore = "";
-            writer.write("time; type; bitrate Kbps; id");
+            writer.write("time; type; bitrate Kbps; id; video seconds");
             writer.newLine();
             while (true) {
                 line = proxyOutput.readLine();
@@ -196,6 +201,7 @@ public class DashStreamTests {
                 }
                 if (line.startsWith("Response time:")) {
                     writer.write(transformString(lineBefore, line));
+                    writer.write("; " + currentTime);
                     writer.newLine();
                     writer.flush();
                 } else {
