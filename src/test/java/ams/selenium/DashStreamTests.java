@@ -188,6 +188,7 @@ public class DashStreamTests {
             String line;
             String lineBefore = "";
             writer.write("time; type; bitrate Kbps; id");
+            writer.newLine();
             while (true) {
                 line = proxyOutput.readLine();
                 if (line == null) {
