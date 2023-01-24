@@ -8,6 +8,8 @@ import org.openqa.selenium.*;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.chromium.ChromiumNetworkConditions;
+import org.openqa.selenium.devtools.DevTools;
+import org.openqa.selenium.devtools.v85.network.Network;
 
 
 import java.io.*;
@@ -91,9 +93,12 @@ public class DashStreamTests {
 
         ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
         driver.setNetworkConditions(currentConditions.updateChromiumNetworkConditions(cond));
+        DevTools devTools = driver.getDevTools();
+        devTools.createSession();
 
         System.out.println("Now testing with network condition: " + currentConditions);
         driver.get("https://streaming.stulpinger.at/");
+        devTools.send(Network.setCacheDisabled(true));
         waitForPageLoad(driver);
         WebElement video = driver.findElement(By.tagName("video"));
         StringBuilder build = new StringBuilder();
@@ -101,7 +106,7 @@ public class DashStreamTests {
         out.getParentFile().mkdir();
         out.createNewFile();
         this.writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
-        writer.write("time; buffer(s); video seconds");
+        writer.write("time; buffer(s); video seconds; throttling bandwidth; latency");
         writer.newLine();
         while (true) {
             build.setLength(0);
@@ -140,7 +145,7 @@ public class DashStreamTests {
             } else {
                 build.append(bufferSize).append("; ");
             }
-            build.append(this.currentTime);
+            build.append(this.currentTime).append(", ").append(currentConditions.getBandwidth()).append("; ").append(currentConditions.getLatency());
             this.writer.write(build.toString());
             this.writer.newLine();
             this.writer.flush();
