@@ -83,17 +83,18 @@ public class DashStreamTests {
      * @throws IOException
      */
     @ParameterizedTest
-    @ValueSource(strings = {"conditions1.csv", "conditions2.csv"})
+    @ValueSource(strings = {"conditions1.csv"})
     public void test1(String networkConditionsFile) throws IOException {
         this.startTime = new Timestamp(System.currentTimeMillis());
         DateTimeFormatter format = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSS");
         System.out.println("Starting test1 at: " + startTime + ", with network conditions: " + networkConditionsFile);
         LinkedList<NetworkCondition> networkConditions = parseNetworkConditionsFile(networkConditionsFile);
-        NetworkCondition currentConditions = new NetworkCondition(0, 5000, 0);
+        NetworkCondition currentConditions = new NetworkCondition(0, 1000, 0);
         NetworkCondition nextConditions = networkConditions.removeFirst();
 
         ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
         driver.setNetworkConditions(currentConditions.updateChromiumNetworkConditions(cond));
+        this.currentThrottle = currentConditions.getBandwidth()*8;
         DevTools devTools = driver.getDevTools();
         devTools.createSession();
 
@@ -199,19 +200,18 @@ public class DashStreamTests {
             BufferedReader proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             String lineBefore = "";
-            writer.write("time; video bitrate Kbps; audio bitrate Kbps; throttle bitrate (kbps), id; video seconds");
+            writer.write("time; video bitrate Kbps; audio bitrate Kbps; throttle bitrate (Kbps); id; video seconds");
             writer.newLine();
-            String lastAudioBitrate = "";
-            String lastVideoBitrate = "";
-            String lastAudioId = "";
-            String lastVideoId = "";
+            String lastAudioBitrate = "0";
+            String lastVideoBitrate = "0";
+            String lastAudioId = "0";
+            String lastVideoId = "0";
             while (true) {
                 line = proxyOutput.readLine();
                 if (line == null) {
                     break;
                 }
                 if (line.startsWith("Response time:")) {
-                    writer.write(getDateTime(line) + "; ");
                     String[] tmp = getBitrateAndFileIdFromResponse(lineBefore).split(";");
                     if (tmp[0].startsWith("video")){
                         lastVideoBitrate = tmp[1].trim();
@@ -220,13 +220,12 @@ public class DashStreamTests {
                         lastAudioBitrate = tmp[1].trim();
                         lastAudioId = tmp[2].trim();
                     }
-                    if(!(lastVideoBitrate.equals("") || lastAudioBitrate.equals(""))){
-                        writer.write("; " + lastVideoBitrate);
-                        writer.write("; "+ lastAudioBitrate);
-                    }
-                    writer.write("; " + currentThrottle);
-                    writer.write("; " + lastVideoId + "; " + lastAudioId);
-                    writer.write("; " + currentTime);
+                    writer.write(getDateTime(line) + "; ");
+                    writer.write( lastVideoBitrate + "; ");
+                    writer.write(lastAudioBitrate + "; ");
+                    writer.write( currentThrottle + "; ");
+                    writer.write( lastVideoId + "; ");
+                    writer.write(String.valueOf(currentTime));
                     writer.newLine();
                     writer.flush();
                 } else {
