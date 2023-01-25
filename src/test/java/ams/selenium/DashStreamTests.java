@@ -19,7 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import static ams.selenium.NetworkCondition.parseNetworkConditionsFile;
-import static ams.selenium.Utils.transformString;
+import static ams.selenium.Utils.*;
 
 public class DashStreamTests {
     private static final Integer PROXY_PORT = 8087;
@@ -28,6 +28,7 @@ public class DashStreamTests {
     private Thread bgThread;
     private Timestamp startTime;
     private BufferedWriter writer;
+    private int currentThrottle;
     private double currentTime = 0;
 
 
@@ -124,8 +125,9 @@ public class DashStreamTests {
                     nextConditions = null;
                 }
                 driver.setNetworkConditions(currentConditions.updateChromiumNetworkConditions(cond));
+                this.currentThrottle = currentConditions.getBandwidth() * 8;
                 System.out.println("Now testing with network condition: " + currentConditions);
-                System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "Kbps, Latency: " + driver.getNetworkConditions().getLatency());
+                System.out.println("Download: " + driver.getNetworkConditions().getDownloadThroughput() / 1000 + "KBps, Latency: " + driver.getNetworkConditions().getLatency());
             }
 
 
@@ -145,7 +147,7 @@ public class DashStreamTests {
             } else {
                 build.append(bufferSize).append("; ");
             }
-            build.append(this.currentTime).append(", ").append(currentConditions.getBandwidth()).append("; ").append(currentConditions.getLatency());
+            build.append(this.currentTime).append("; ").append(currentConditions.getBandwidth()).append("; ").append(currentConditions.getLatency());
             this.writer.write(build.toString());
             this.writer.newLine();
             this.writer.flush();
@@ -197,15 +199,33 @@ public class DashStreamTests {
             BufferedReader proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             String lineBefore = "";
-            writer.write("time; type; bitrate Kbps; id; video seconds");
+            writer.write("time; video bitrate Kbps; audio bitrate Kbps; throttle bitrate (kbps), id; video seconds");
             writer.newLine();
+            String lastAudioBitrate = "";
+            String lastVideoBitrate = "";
+            String lastAudioId = "";
+            String lastVideoId = "";
             while (true) {
                 line = proxyOutput.readLine();
                 if (line == null) {
                     break;
                 }
                 if (line.startsWith("Response time:")) {
-                    writer.write(transformString(lineBefore, line));
+                    writer.write(getDateTime(line) + "; ");
+                    String[] tmp = getBitrateAndFileIdFromResponse(lineBefore).split(";");
+                    if (tmp[0].startsWith("video")){
+                        lastVideoBitrate = tmp[1].trim();
+                        lastVideoId = tmp[2].trim();
+                    }else {
+                        lastAudioBitrate = tmp[1].trim();
+                        lastAudioId = tmp[2].trim();
+                    }
+                    if(!(lastVideoBitrate.equals("") || lastAudioBitrate.equals(""))){
+                        writer.write("; " + lastVideoBitrate);
+                        writer.write("; "+ lastAudioBitrate);
+                    }
+                    writer.write("; " + currentThrottle);
+                    writer.write("; " + lastVideoId + "; " + lastAudioId);
                     writer.write("; " + currentTime);
                     writer.newLine();
                     writer.flush();
