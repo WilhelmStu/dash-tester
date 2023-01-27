@@ -24,6 +24,7 @@ import static ams.selenium.Utils.*;
 public class DashStreamTests {
     private static final Integer PROXY_PORT = 8087;
     private static final Integer CYCLE_TIME = 500;
+    private static final String URL = "https://streaming.stulpinger.at/"; // "http:localhost:8080"
     private ChromeDriver driver;
     private Thread bgThread;
     private Timestamp startTime;
@@ -34,7 +35,6 @@ public class DashStreamTests {
 
     @BeforeAll
     public static void setUpAll() {
-        //Configuration.browserSize = "1920x1080";
     }
 
     /**
@@ -57,13 +57,16 @@ public class DashStreamTests {
         ChromeDriverManager.chromedriver().setup();
         ChromeOptions options = new ChromeOptions();
         options.addArguments("--proxy-server=http://localhost:" + PROXY_PORT);
+        //options.addArguments("--headless");
+        //options.addArguments("--no-sandbox");
+        //options.addArguments("--disable-dev-shm-usage");
         driver = new ChromeDriver(options);
 
         Runnable r = this::startAndLogProxy;
         bgThread = new Thread(r);
         bgThread.start();
 
-        try {
+        try { // wait for the proxy to be ready
             Thread.sleep(500);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
@@ -71,22 +74,25 @@ public class DashStreamTests {
 
     }
 
-    // detect buffering: https://stackoverflow.com/questions/21399872/how-to-detect-whether-html5-video-has-paused-for-buffering
+    // another way to detect buffering: https://stackoverflow.com/questions/21399872/how-to-detect-whether-html5-video-has-paused-for-buffering
     // video element reference: https://www.w3schools.com/tags/ref_av_dom.asp
     // performance of browser : https://stackoverflow.com/questions/45847035/using-selenium-how-to-get-network-request
     // proxy: https://github.com/mitmproxy/mitmproxy
 
     /**
      * The main test class that is run once for each file defined in @ValueSource
+     * The condition files have the format time; bandwidth; latency. From the given time onwards the bandwidth is applied to the browser
      * The whole test takes 10 minutes and outputs the current buffer of the video at specific points in time
+     *
      * @param networkConditionsFile test files
      * @throws IOException
      */
     @ParameterizedTest
-    @ValueSource(strings = {"conditions1.csv"})
+    @ValueSource(strings = {"conditions1.csv", "conditions2.csv"})
     public void test1(String networkConditionsFile) throws IOException {
         this.startTime = new Timestamp(System.currentTimeMillis());
         DateTimeFormatter format = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSS");
+        StringBuilder build = new StringBuilder();
         System.out.println("Starting test1 at: " + startTime + ", with network conditions: " + networkConditionsFile);
         LinkedList<NetworkCondition> networkConditions = parseNetworkConditionsFile(networkConditionsFile);
         NetworkCondition currentConditions = new NetworkCondition(0, 1000, 0);
@@ -94,21 +100,20 @@ public class DashStreamTests {
 
         ChromiumNetworkConditions cond = new ChromiumNetworkConditions();
         driver.setNetworkConditions(currentConditions.updateChromiumNetworkConditions(cond));
-        this.currentThrottle = currentConditions.getBandwidth()*8;
+        this.currentThrottle = currentConditions.getBandwidth() * 8;
         DevTools devTools = driver.getDevTools();
         devTools.createSession();
 
         System.out.println("Now testing with network condition: " + currentConditions);
-        driver.get("https://streaming.stulpinger.at/");
-        devTools.send(Network.setCacheDisabled(true));
+        driver.get(URL);
+        devTools.send(Network.setCacheDisabled(true)); // this may not be working
         waitForPageLoad(driver);
         WebElement video = driver.findElement(By.tagName("video"));
-        StringBuilder build = new StringBuilder();
         File out = new File("out" + File.separator + "Buffer-" + networkConditionsFile + "-" + startTime.toString().replace(':', '-') + ".txt");
         out.getParentFile().mkdir();
         out.createNewFile();
         this.writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(out)));
-        writer.write("time; buffer(s); video seconds; throttling bandwidth; latency");
+        writer.write("time; buffer(s); video time; throttle Kbps; latency");
         writer.newLine();
         while (true) {
             build.setLength(0);
@@ -172,6 +177,7 @@ public class DashStreamTests {
 
     /**
      * Makes sure the page is loaded before the video and logging starts
+     *
      * @param driver
      */
     private static void waitForPageLoad(WebDriver driver) {
@@ -200,7 +206,7 @@ public class DashStreamTests {
             BufferedReader proxyOutput = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             String lineBefore = "";
-            writer.write("time; video bitrate Kbps; audio bitrate Kbps; throttle bitrate (Kbps); id; video seconds");
+            writer.write("time; video bitrate Kbps; audio bitrate Kbps; throttle Kbps; id; video time");
             writer.newLine();
             String lastAudioBitrate = "0";
             String lastVideoBitrate = "0";
@@ -213,18 +219,18 @@ public class DashStreamTests {
                 }
                 if (line.startsWith("Response time:")) {
                     String[] tmp = getBitrateAndFileIdFromResponse(lineBefore).split(";");
-                    if (tmp[0].startsWith("video")){
+                    if (tmp[0].startsWith("video")) {
                         lastVideoBitrate = tmp[1].trim();
                         lastVideoId = tmp[2].trim();
-                    }else {
+                    } else {
                         lastAudioBitrate = tmp[1].trim();
                         lastAudioId = tmp[2].trim();
                     }
                     writer.write(getDateTime(line) + "; ");
-                    writer.write( lastVideoBitrate + "; ");
+                    writer.write(lastVideoBitrate + "; ");
                     writer.write(lastAudioBitrate + "; ");
-                    writer.write( currentThrottle + "; ");
-                    writer.write( lastVideoId + "; ");
+                    writer.write(currentThrottle + "; ");
+                    writer.write(lastVideoId + "; ");
                     writer.write(String.valueOf(currentTime));
                     writer.newLine();
                     writer.flush();
